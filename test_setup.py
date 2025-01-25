@@ -1,5 +1,5 @@
 """
-This file is used to setup the test environment.
+This module is used to setup the test environment.
 """
 
 from sqlmodel import Session
@@ -8,7 +8,7 @@ from .db import engine
 from .models import Area, Restaurant, Branch, Item
 
 
-if __name__ == "__main__":
+def fill_db():
     with Session(engine()) as session:
         
         # Create areas
@@ -92,3 +92,5 @@ if __name__ == "__main__":
         session.commit()
 
 
+if __name__ == "__main__":
+    fill_db()

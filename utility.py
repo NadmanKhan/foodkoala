@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from jwt import encode, decode
 from math import sqrt, sin, cos, atan2
 from passlib.context import CryptContext
@@ -6,9 +6,9 @@ from sqlmodel import select, Session
 from time import sleep
 from typing import Optional
 
-from .models import Area, Branch, Order, Item, OrderItem, User, Restaurant
+from .models import Order, User
 from .db import engine
-from .settings import SECRET_KEY
+from .settings import SECRET
 
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -26,16 +26,16 @@ def hash_password(password: str) -> str:
     return _pwd_context.hash(password)
 
 
-def authenticate_user(email: str, password: str) -> bool:
+def verify_user(email: str, password: str) -> bool:
     """
-    Authenticate a user using their email and password.
+    Verify a user's email and password.
 
     Parameters:
     * `email`: `str` -- The email of the user
     * `password`: `str` -- The password of the user
 
     Returns:
-    * `bool` -- `True` if the user is authenticated, `False` otherwise
+    * `bool` -- `True` if the email and password match, `False` otherwise
     """
     with Session(engine()) as session:
         user = session.exec(select(User).where(User.email == email)).first()
@@ -44,20 +44,21 @@ def authenticate_user(email: str, password: str) -> bool:
         return _pwd_context.verify(password, user.password)
 
 
-def create_access_token(data: dict, expires_minutes: int = 3600) -> str:
+def create_access_token(email: str) -> str:
     """
-    Create a JWT access token using the provided data.
+    Create a JWT access token using the user's email.
 
     Parameters:
-    * `data`: `dict` -- The data to encode in the token
+    * `email`: `str` -- The email of the user
 
     Returns:
     * `str` -- The JWT access token
     """
-    to_encode = data.copy()
-    expire = datetime.now() + timedelta(minutes=expires_minutes)
-    to_encode.update({"exp": expire})
-    return encode(to_encode, SECRET_KEY, algorithm="HS256")
+    payload = {
+        "sub": email,
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=3600),
+    }
+    return encode(payload, SECRET, algorithm="HS256")
 
 
 def get_user_from_token(token: str) -> Optional[User]:
@@ -71,7 +72,7 @@ def get_user_from_token(token: str) -> Optional[User]:
     * `User` -- The user object
     """
     try:
-        payload = decode(token, SECRET_KEY, algorithms=["HS256"])
+        payload: dict[str, str] = decode(token, SECRET, algorithms=["HS256"])
         user_email: str = payload.get("sub")
         if user_email is None:
             return None
@@ -103,7 +104,18 @@ def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 def in_range(lat_src: float, lon_src: float, lat_dst: float, lon_dst: float) -> bool:
-    """ """
+    """
+    Check if two points are within the allowed distance for delivery.
+
+    Parameters:
+    * `lat_src`: `float` -- Latitude of the source point
+    * `lon_src`: `float` -- Longitude of the source point
+    * `lat_dst`: `float` -- Latitude of the destination point
+    * `lon_dst`: `float` -- Longitude of the destination point
+
+    Returns:
+    * `bool` -- `True` if the points are within the allowed distance, `False` otherwise
+    """
     return haversine(lat_src, lon_src, lat_dst, lon_dst) <= 5000
 
 
@@ -127,6 +139,8 @@ def process_order(order: Order):
             (60, Order.Status.DELIVERED),
         ]:
             sleep(seconds)
+            if order.status == Order.Status.CANCELLED:
+                return
             order.status = status
             session.add(order)
             session.commit()

@@ -7,13 +7,13 @@ from typing import List, Optional
 from typing_extensions import Annotated
 
 from .db import engine
-from .models import Area, User, Restaurant, Branch, Item, Order, OrderItem, Token
+from .models import Area, User, Restaurant, Branch, Order, Token
 from .utility import (
     haversine,
     in_range,
     process_order,
     hash_password,
-    authenticate_user,
+    verify_user,
     create_access_token,
     get_user_from_token,
 )
@@ -72,7 +72,7 @@ async def login_for_access_token(
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
     # Authenticate the user
-    if not authenticate_user(form_data.username, form_data.password):
+    if not verify_user(form_data.username, form_data.password):
         raise credentials_exception
 
     # Get the user

@@ -3,13 +3,13 @@ from dotenv import load_dotenv
 import os
 
 
-class EnvType(str, Enum):
-    DEVELOPMENT = "development"
-    PRODUCTION = "production"
+class RunMode(str, Enum):
+    DEV = "dev"
+    PROD = "prod"
 
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite://")
-ENVIRONMENT = os.getenv("ENVIRONMENT", EnvType.DEVELOPMENT)
-SECRET_KEY = os.getenv("SECRET_KEY", "my_secret_key")
+DB_URL = os.getenv("DATABASE_URL", "sqlite://") # "sqlite://" for in-memory database
+RUN_MODE = os.getenv("RUN_MODE", RunMode.DEV)
+SECRET = os.getenv("SECRET", "my_secret_key")
