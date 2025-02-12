@@ -6,9 +6,9 @@ from sqlmodel import col, select, Session
 from typing import List, Optional
 from typing_extensions import Annotated
 
-from .db import engine
-from .models import Area, User, Restaurant, Branch, Order, Token
-from .utility import (
+from .config import API_V1_PREFIX
+from .storage.mappers import new_db_session, Area, User, Restaurant, Branch, Order, Token
+from .utilities import (
     haversine,
     in_range,
     process_order,
@@ -18,14 +18,14 @@ from .utility import (
     get_user_from_token,
 )
 
-router = APIRouter(prefix="/api/v1")
+router = APIRouter(prefix=API_V1_PREFIX)
 
 
 @router.post("/signup/")
 async def sign_up(user: User) -> User:
-    with Session(engine()) as session:
+    with new_db_session() as db:
         # Check if the user already exists
-        existing_user = session.exec(select(User).where(User.email == user.email)).first()
+        existing_user = db.exec(select(User).where(User.email == user.email)).first()
         if existing_user:
             raise HTTPException(status_code=400, detail="User with this email already exists")
 
@@ -49,9 +49,9 @@ async def sign_up(user: User) -> User:
         user.password = hash_password(user.password)
 
         user.id = None
-        session.add(user)
-        session.commit()
-        session.refresh(user)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
 
         # Remove the password from the response before returning
         del user.password
@@ -77,8 +77,8 @@ async def login_for_access_token(
 
     # Get the user
     user: Optional[User] = None
-    with Session(engine()) as session:
-        user = session.exec(select(User).where(User.email == form_data.username)).first()
+    with new_db_session() as db:
+        user = db.exec(select(User).where(User.email == form_data.username)).first()
     assert user is not None
 
     # Create and return the access token
@@ -95,22 +95,22 @@ async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)]) -> Use
 
 @router.get("/orders/")
 async def read_orders_of_current_user(user: Annotated[User, Depends(get_current_user)]):
-    with Session(engine()) as session:
-        return session.exec(select(Order).where(Order.user_id == user.id)).all()
+    with new_db_session() as db:
+        return db.exec(select(Order).where(Order.user_id == user.id)).all()
 
 
 @router.post("/orders/")
 async def create_order(order: Order, background_tasks: BackgroundTasks):
-    with Session(engine()) as session:
+    with new_db_session() as db:
         order.id = None
 
         # Find the nearest 4 areas to the order location
-        areas = session.exec(select(Area)).all()
+        areas = db.exec(select(Area)).all()
         areas = sorted(areas, key=lambda area: haversine(area.loc_lat, area.loc_lon, order.loc_lat, order.loc_lon))
         areas = areas[:4]
 
         # Get the branches in these 4 areas
-        branches = session.exec(select(Branch).where(col(Branch.area_id).in_([area.id for area in areas]))).all()
+        branches = db.exec(select(Branch).where(col(Branch.area_id).in_([area.id for area in areas]))).all()
 
         # Filter branches that are too far (more than 5 km) away
         branches = [
@@ -124,9 +124,9 @@ async def create_order(order: Order, background_tasks: BackgroundTasks):
 
         # Otherwise, save and process the order
         order.status = Order.Status.PENDING
-        session.add(order)
-        session.commit()
-        session.refresh(order)
+        db.add(order)
+        db.commit()
+        db.refresh(order)
 
         # Process the order in the background
         background_tasks.add_task(process_order, order)
@@ -136,14 +136,14 @@ async def create_order(order: Order, background_tasks: BackgroundTasks):
 
 @router.get("/areas/")
 async def read_areas():
-    with Session(engine()) as session:
-        return session.exec(select(Area)).all()
+    with new_db_session() as db:
+        return db.exec(select(Area)).all()
 
 
 @router.get("/restaurants/")
 async def read_restaurants(lat: Optional[float] = None, lon: Optional[float] = None, in_radians: Optional[bool] = None):
-    with Session(engine()) as session:
-        restaurants = session.exec(select(Restaurant)).all()
+    with new_db_session() as db:
+        restaurants = db.exec(select(Restaurant)).all()
 
         # Filter the branches based on the location
         # and remove the restaurants that have no branches left
@@ -158,7 +158,33 @@ async def read_restaurants(lat: Optional[float] = None, lon: Optional[float] = N
         return restaurants
 
 
+def closest_areas(lat: float, lon: float, n: int):
+    with new_db_session() as db:
+        areas = db.exec(select(Area)).all()
+        areas = sorted(areas, key=lambda area: haversine(area.loc_lat, area.loc_lon, lat, lon))
+        return areas[:n]
+
+
+@router.get("/restaurants/")
+async def read_restaurants(lat: float, lon: float):
+    with new_db_session() as db:
+
+        # Find the nearest 4 areas to the location
+        areas = closest_areas(lat, lon, 4)
+
+        # Get the branches in these 4 areas and the restaurants they belong to
+        restaurants = db.exec(
+            select(Restaurant).join(Branch).where(col(Area.id).in_([area.id for area in areas]))
+        ).all()
+
+        # Filter branches that are too far away
+        for r in restaurants:
+            r.branches = [branch for branch in r.branches if in_range(lat, lon, branch.loc_lat, branch.loc_lon)]
+
+        return restaurants
+
+
 @router.get("/restaurants/{restaurant_id}")
 async def read_restaurant(restaurant_id: int):
-    with Session(engine()) as session:
-        return session.get(Restaurant, restaurant_id)
+    with new_db_session() as db:
+        return db.get(Restaurant, restaurant_id)

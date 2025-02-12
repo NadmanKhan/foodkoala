@@ -1,12 +1,22 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, APIRouter
 
-from .api import router
-from .test_setup import fill_db
-from .settings import RUN_MODE, RunMode
+from app.controllers import (
+    login_router,
+    restaurant_router,
+    user_router,
+    area_router,
+    order_router,
+)
+from app.config import RUN_MODE, RunMode, API_V1_PREFIX
 
 
-if RUN_MODE == RunMode.DEV:
-    fill_db()
+api = APIRouter(prefix=API_V1_PREFIX)
+
+api.include_router(login_router)
+api.include_router(user_router)
+api.include_router(restaurant_router)
+api.include_router(area_router)
+api.include_router(order_router)
 
 app = FastAPI()
-app.include_router(router)
+app.include_router(api)

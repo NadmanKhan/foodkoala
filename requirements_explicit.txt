@@ -1,0 +1,6 @@
+fastapi[standard]
+sqlmodel
+PyJWT
+passlib[bcrypt]
+email-validator
+python-multipart
